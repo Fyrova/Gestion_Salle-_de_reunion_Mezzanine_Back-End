@@ -1,0 +1,25 @@
+Updated save method outline for recurring reservations in ReservationService:
+
+1. Check if reservation.recurrenceRule is null or empty:
+   - If yes, proceed with existing save logic for single reservation.
+
+2. If recurrenceRule is present:
+   - Parse the recurrenceRule to determine recurrence pattern (e.g., using iCal RRULE parser).
+   - Create and save the parent reservation (the series master).
+   - Generate all occurrences (Reservation instances) based on recurrenceRule and parent reservation.
+   - For each occurrence:
+       - Set parentReservation to the parent.
+       - Set date, startTime, endTime accordingly.
+       - Validate the occurrence for conflicts.
+       - Save the occurrence.
+   - Return the parent reservation or list of occurrences as needed.
+
+3. Handle exceptions and rollback if any occurrence conflicts or errors occur.
+
+4. Publish creation event for the parent reservation.
+
+Note: This outline requires implementing or integrating a recurrence rule parser and occurrence generator.
+
+Next steps:
+- Implement recurrence rule parsing and occurrence generation.
+- Update API and frontend to support recurrence input and management.
