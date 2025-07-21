@@ -14,6 +14,7 @@ public class ReservationDTO {
     private String subject;
     private String organizerName;
     private String status;
+    private String departement;
 
     public ReservationDTO(Reservation reservation) {
         this.id = reservation.getId();
@@ -23,9 +24,10 @@ public class ReservationDTO {
         this.subject = reservation.getSubject();
         this.organizerName = reservation.getOrganizer() != null ? reservation.getOrganizer().getName() : null;
         this.status = reservation.getStatus() != null ? reservation.getStatus().name() : null;
+        this.departement = reservation.getDepartement();
     }
 
-    // Getters and setters
+    
 
     public Long getId() {
         return id;
@@ -81,5 +83,13 @@ public class ReservationDTO {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getDepartement() {
+        return departement;
+    }
+
+    public void setDepartement(String departement) {
+        this.departement = departement;
     }
 }
