@@ -98,3 +98,4 @@ public class EmailService {
         sendEmailSync(to, subject, text);
     }
 }
+
