@@ -73,6 +73,9 @@ public class Reservation {
     @JoinColumn(name = "parent_reservation_id")
     private Reservation parentReservation;
 
+    @Column(name = "end_date")
+    private LocalDate endDate;
+
     @Column(name = "departement")
     private String departement;
 }

@@ -2,6 +2,7 @@ package edbm.salle.demo.service;
 
 import edbm.salle.demo.events.ReservationEvent;
 import edbm.salle.demo.service.ReservationServiceHelper;
+import java.time.DayOfWeek;
 import edbm.salle.demo.model.Reservation;
 import edbm.salle.demo.model.User;
 import edbm.salle.demo.repository.ReservationRepository;
@@ -18,9 +19,14 @@ import jakarta.persistence.PersistenceContext;
 import java.time.LocalTime;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class ReservationService implements IReservationService {
@@ -107,7 +113,13 @@ public class ReservationService implements IReservationService {
         } else {
             logger.info("Début de la sauvegarde d'une réservation récurrente");
 
-            Map<String, String> ruleParts = RRuleHelper.parseRRule(reservation.getRecurrenceRule());
+            // Preprocess recurrenceRule to extract date part from UNTIL field if present
+            String recurrenceRule = reservation.getRecurrenceRule();
+            if (recurrenceRule != null && recurrenceRule.contains("UNTIL=")) {
+                recurrenceRule = recurrenceRule.replaceAll("UNTIL=([^;T]+)T[^;]+", "UNTIL=$1");
+            }
+
+            Map<String, String> ruleParts = RRuleHelper.parseRRule(recurrenceRule);
             int count = RRuleHelper.calculateOccurrenceCount(reservation.getDate(), ruleParts);
 
             if (validateOverlap) {
@@ -138,6 +150,19 @@ public class ReservationService implements IReservationService {
                 reservation.setDepartement(""); // or set a default value if needed
             }
 
+            // Set endDate from recurrenceRule UNTIL if present
+            if (ruleParts.containsKey("UNTIL")) {
+                String untilStr = ruleParts.get("UNTIL");
+                try {
+                    java.time.LocalDate untilDate = java.time.LocalDate.parse(untilStr, java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+                    reservation.setEndDate(untilDate);
+                } catch (Exception e) {
+                    logger.warn("Erreur lors de la conversion de la date UNTIL en endDate: " + e.getMessage());
+                }
+            } else {
+                reservation.setEndDate(null);
+            }
+
             String freq = ruleParts.getOrDefault("FREQ", "DAILY");
             int interval = Integer.parseInt(ruleParts.getOrDefault("INTERVAL", "1"));
 
@@ -153,95 +178,44 @@ public class ReservationService implements IReservationService {
                 }
             }
 
-            // Save parent reservation
             Reservation parentReservation = reservationRepository.save(reservation);
-
-            // Generate occurrences list
             java.util.List<Reservation> occurrencesToSave = new java.util.ArrayList<>();
 
             if ("MONTHLY".equals(freq) && ruleParts.containsKey("BYDAY") && ruleParts.containsKey("BYSETPOS")) {
-                // Use dedicated method for monthly recurrence with BYDAY and BYSETPOS
+                
                 occurrencesToSave.addAll(generateMonthlyByDayOccurrences(parentReservation, count, interval, ruleParts, validateOverlap));
             } else {
-                // Use existing logic for other recurrence types
+                
                 java.time.LocalDate currentDate = parentReservation.getDate();
 
-                if ("WEEKLY".equals(freq) && ruleParts.containsKey("BYDAY")) {
-                    // Generate occurrences for each BYDAY in each week
-                    String[] byDays = ruleParts.get("BYDAY").split(",");
-                    java.time.LocalDate baseDate = parentReservation.getDate();
-                    java.util.List<java.time.LocalDate> allDates = new java.util.ArrayList<>();
-
-                    for (int week = 0; allDates.size() < count - 1; week++) {
-                        java.time.LocalDate weekStart = baseDate.plusWeeks(week * interval)
-                            .with(java.time.DayOfWeek.MONDAY);
-                        for (String day : byDays) {
-                            java.time.DayOfWeek dayOfWeek = RRuleHelper.parseDayOfWeek(day);
-                            java.time.LocalDate nextDate = weekStart.plusDays(dayOfWeek.getValue() - 1);
-                            if (week == 0 && nextDate.isBefore(baseDate)) {
-                                // Skip days before baseDate in the first week
-                                continue;
-                            }
-                            if (nextDate.isBefore(baseDate)) {
-                                nextDate = nextDate.plusWeeks(interval);
-                            }
-                            allDates.add(nextDate);
-                        }
-                    }
-
-                    // Sort all dates and add occurrences up to count - 1
-                    allDates.sort(java.time.LocalDate::compareTo);
-                    int occurrencesAdded = 0;
-                    for (java.time.LocalDate date : allDates) {
-                        if (occurrencesAdded >= count - 1) break;
-                        if (!reservationRepository.existsByParentReservationAndDate(parentReservation, date)) {
-                            Reservation occurrence = new Reservation();
-                            occurrence.setParentReservation(parentReservation);
-                            occurrence.setDate(date);
-                            occurrence.setStartTime(parentReservation.getStartTime());
-                            occurrence.setEndTime(parentReservation.getEndTime());
-                            occurrence.setSubject(parentReservation.getSubject());
-                            occurrence.setOrganizer(parentReservation.getOrganizer());
-                            occurrence.setStatus(parentReservation.getStatus());
-                            occurrence.setReservationType(parentReservation.getReservationType());
-                            occurrence.setEquipment(parentReservation.getEquipment());
-                            occurrence.setDisposition(parentReservation.getDisposition());
-                            occurrence.setParticipantsCount(parentReservation.getParticipantsCount());
-                            occurrence.setDepartement(parentReservation.getDepartement());
-                            occurrence.setRecurrenceRule(null);
-                            if (validateOverlap) {
-                                validateReservation(occurrence);
-                            }
-                            occurrencesToSave.add(occurrence);
-                            occurrencesAdded++;
-                        }
-                    }
-                } else {
-                    for (int i = 1; i < count; i++) {
-                        currentDate = RRuleHelper.calculateNextDate(currentDate, freq, interval, ruleParts);
-                        boolean exists = reservationRepository.existsByParentReservationAndDate(parentReservation, currentDate);
-                        if (!exists) {
-                            Reservation occurrence = new Reservation();
-                            occurrence.setParentReservation(parentReservation);
-                            occurrence.setDate(currentDate);
-                            occurrence.setStartTime(parentReservation.getStartTime());
-                            occurrence.setEndTime(parentReservation.getEndTime());
-                            occurrence.setSubject(parentReservation.getSubject());
-                            occurrence.setOrganizer(parentReservation.getOrganizer());
-                            occurrence.setStatus(parentReservation.getStatus());
-                            occurrence.setReservationType(parentReservation.getReservationType());
-                            occurrence.setEquipment(parentReservation.getEquipment());
-                            occurrence.setDisposition(parentReservation.getDisposition());
-                            occurrence.setParticipantsCount(parentReservation.getParticipantsCount());
-                            occurrence.setDepartement(parentReservation.getDepartement());
-                            occurrence.setRecurrenceRule(null);
-                            if (validateOverlap) {
-                                validateReservation(occurrence);
-                            }
-                            occurrencesToSave.add(occurrence);
-                        }
-                    }
-                }
+if ("WEEKLY".equals(freq) && ruleParts.containsKey("BYDAY")) {
+    occurrencesToSave.addAll(generateWeeklyOccurrences(parentReservation, count, interval, ruleParts, validateOverlap));
+} else {
+    for (int i = 1; i < count; i++) {
+        currentDate = RRuleHelper.calculateNextDate(currentDate, freq, interval, ruleParts);
+        boolean exists = reservationRepository.existsByParentReservationAndDate(parentReservation, currentDate);
+        if (!exists) {
+            Reservation occurrence = new Reservation();
+            occurrence.setParentReservation(parentReservation);
+            occurrence.setDate(currentDate);
+            occurrence.setStartTime(parentReservation.getStartTime());
+            occurrence.setEndTime(parentReservation.getEndTime());
+            occurrence.setSubject(parentReservation.getSubject());
+            occurrence.setOrganizer(parentReservation.getOrganizer());
+            occurrence.setStatus(parentReservation.getStatus());
+            occurrence.setReservationType(parentReservation.getReservationType());
+            occurrence.setEquipment(parentReservation.getEquipment());
+            occurrence.setDisposition(parentReservation.getDisposition());
+            occurrence.setParticipantsCount(parentReservation.getParticipantsCount());
+            occurrence.setDepartement(parentReservation.getDepartement());
+            occurrence.setRecurrenceRule(null);
+            if (validateOverlap) {
+                validateReservation(occurrence);
+            }
+            occurrencesToSave.add(occurrence);
+        }
+    }
+}
             }
 
             reservationRepository.saveAll(occurrencesToSave);
@@ -291,23 +265,24 @@ public class ReservationService implements IReservationService {
         return occurrences;
     }
 
-    private String buildRecurrenceDatesTable(Reservation parentReservation, int count, String freq, int interval, Map<String, String> ruleParts) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n=== Dates des occurrences de la réservation récurrente ===\n");
-        sb.append(String.format("%-15s %-10s\n", "Date", "Jour"));
-        java.time.LocalDate currentDate = parentReservation.getDate();
-        sb.append(String.format("%-15s %-10s\n", currentDate.toString(), currentDate.getDayOfWeek().toString()));
-        for (int i = 1; i < count; i++) {
-            if ("MONTHLY".equals(freq) && ruleParts.containsKey("BYDAY") && ruleParts.containsKey("BYSETPOS")) {
-                // For monthly recurrence with BYDAY and BYSETPOS, calculate next date differently
-                currentDate = RRuleHelper.calculateNextDate(currentDate, freq, interval, ruleParts);
-            } else {
-                currentDate = RRuleHelper.calculateNextDate(currentDate, freq, interval, ruleParts);
-            }
-            sb.append(String.format("%-15s %-10s\n", currentDate.toString(), currentDate.getDayOfWeek().toString()));
-        }
-        return sb.toString();
+private String buildRecurrenceDatesTable(Reservation parentReservation, int count, String freq, int interval, Map<String, String> ruleParts) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("\n=== Dates des occurrences de la réservation récurrente ===\n");
+    sb.append(String.format("%-15s %-10s\n", "Date", "Jour"));
+
+    // Récupérer les occurrences enregistrées en base pour le parentReservation
+    List<Reservation> occurrences = reservationRepository.findByParentReservation(parentReservation);
+    // Ajouter la date du parent
+    sb.append(String.format("%-15s %-10s\n", parentReservation.getDate().toString(), parentReservation.getDate().getDayOfWeek().toString()));
+
+    // Trier les occurrences par date
+    occurrences.sort((r1, r2) -> r1.getDate().compareTo(r2.getDate()));
+
+    for (Reservation occurrence : occurrences) {
+        sb.append(String.format("%-15s %-10s\n", occurrence.getDate().toString(), occurrence.getDate().getDayOfWeek().toString()));
     }
+    return sb.toString();
+}
 
     @Override
     @Transactional
@@ -325,7 +300,8 @@ public class ReservationService implements IReservationService {
             !existingReservation.getDate().equals(updatedReservation.getDate()) ||
             !existingReservation.getStartTime().equals(updatedReservation.getStartTime()) ||
             !existingReservation.getEndTime().equals(updatedReservation.getEndTime()) ||
-            !Objects.equals(existingReservation.getEquipment(), updatedReservation.getEquipment());
+            (updatedReservation.getEquipment() != null && !updatedReservation.getEquipment().trim().isEmpty() &&
+             !Objects.equals(existingReservation.getEquipment(), updatedReservation.getEquipment()));
 
         String actionToPublish = "modifiée";
         if (updatedReservation.getStatus() == Reservation.Status.CANCELLED) {
@@ -335,52 +311,78 @@ public class ReservationService implements IReservationService {
         logger.info("Update reservation id: {}, action: {}, equipmentRelatedChanged: {}, equipment: {}", 
             updatedReservation.getId(), actionToPublish, equipmentRelatedChanged, updatedReservation.getEquipment());
 
+        // Handle organizer User entity to avoid detached entity error
+        User organizer = updatedReservation.getOrganizer();
+        if (organizer != null) {
+            User existingUser = userRepository.findByEmailWithContext(organizer.getEmail());
+            if (existingUser != null) {
+                updatedReservation.setOrganizer(existingUser);
+            } else {
+                organizer = userRepository.saveAndFlush(organizer);
+                updatedReservation.setOrganizer(organizer);
+            }
+        }
+
         switch (actionScope.toLowerCase()) {
 case "series":
     Reservation parentReservation = existingReservation.getParentReservation() == null ? existingReservation : existingReservation.getParentReservation();
     List<Reservation> series = reservationRepository.findByParentReservation(parentReservation);
     java.time.LocalDate updateFromDate = updatedReservation.getDate();
 
-    // Check if recurrence rule has changed
-    boolean recurrenceRuleChanged = !Objects.equals(existingReservation.getRecurrenceRule(), updatedReservation.getRecurrenceRule());
+        // Check if recurrence rule has changed
+        boolean recurrenceRuleChanged = !Objects.equals(existingReservation.getRecurrenceRule(), updatedReservation.getRecurrenceRule());
 
-        if (recurrenceRuleChanged) {
+        // Parse old and new recurrence rules to compare components
+        Map<String, String> oldRuleParts = RRuleHelper.parseRRule(existingReservation.getRecurrenceRule());
+        Map<String, String> newRuleParts = RRuleHelper.parseRRule(updatedReservation.getRecurrenceRule());
+
+        // Compare relevant components to detect changes
+        boolean recurrenceComponentsChanged = !Objects.equals(oldRuleParts.get("FREQ"), newRuleParts.get("FREQ")) ||
+                                              !Objects.equals(oldRuleParts.get("INTERVAL"), newRuleParts.get("INTERVAL")) ||
+                                              !Objects.equals(oldRuleParts.get("BYDAY"), newRuleParts.get("BYDAY")) ||
+                                              !Objects.equals(oldRuleParts.get("UNTIL"), newRuleParts.get("UNTIL")) ||
+                                              !Objects.equals(oldRuleParts.get("COUNT"), newRuleParts.get("COUNT")) ||
+                                              !Objects.equals(oldRuleParts.get("BYSETPOS"), newRuleParts.get("BYSETPOS"));
+
+        if (recurrenceRuleChanged || recurrenceComponentsChanged) {
             // Delete old occurrences except parent
             for (Reservation r : series) {
                 if (!r.equals(parentReservation)) {
                     reservationRepository.delete(r);
                 }
             }
-
+            reservationRepository.flush();
         // Regenerate occurrences based on new recurrence rule
-        Map<String, String> ruleParts = RRuleHelper.parseRRule(parentReservation.getRecurrenceRule());
-        int count = RRuleHelper.calculateOccurrenceCount(parentReservation.getDate(), ruleParts);
+        Map<String, String> ruleParts = RRuleHelper.parseRRule(updatedReservation.getRecurrenceRule());
+        int count = RRuleHelper.calculateOccurrenceCount(updatedReservation.getDate(), ruleParts);
         int interval = Integer.parseInt(ruleParts.getOrDefault("INTERVAL", "1"));
         String freq = ruleParts.getOrDefault("FREQ", "DAILY");
 
         java.util.List<Reservation> newOccurrences = new java.util.ArrayList<>();
 
         if ("MONTHLY".equals(freq) && ruleParts.containsKey("BYDAY") && ruleParts.containsKey("BYSETPOS")) {
-            newOccurrences.addAll(generateMonthlyByDayOccurrences(parentReservation, count, interval, ruleParts, true));
+            newOccurrences.addAll(generateMonthlyByDayOccurrences(updatedReservation, count, interval, ruleParts, true));
+        } else if ("WEEKLY".equals(freq) && ruleParts.containsKey("BYDAY")) {
+            newOccurrences.addAll(generateWeeklyOccurrences(updatedReservation, count, interval, ruleParts, true));
         } else {
-            java.time.LocalDate currentDate = parentReservation.getDate();
+            java.time.LocalDate currentDate = updatedReservation.getDate();
             for (int i = 1; i < count; i++) {
                 currentDate = RRuleHelper.calculateNextDate(currentDate, freq, interval, ruleParts);
-                boolean exists = reservationRepository.existsByParentReservationAndDate(parentReservation, currentDate);
+                boolean exists = reservationRepository.existsByParentReservationAndDate(updatedReservation, currentDate);
                 if (!exists) {
                     Reservation occurrence = new Reservation();
-                    occurrence.setParentReservation(parentReservation);
+                    occurrence.setParentReservation(updatedReservation);
                     occurrence.setDate(currentDate);
-                    occurrence.setStartTime(parentReservation.getStartTime());
-                    occurrence.setEndTime(parentReservation.getEndTime());
-                    occurrence.setSubject(parentReservation.getSubject());
-                    occurrence.setOrganizer(parentReservation.getOrganizer());
-                    occurrence.setStatus(parentReservation.getStatus());
-                    occurrence.setReservationType(parentReservation.getReservationType());
-                    occurrence.setEquipment(parentReservation.getEquipment());
-                    occurrence.setDisposition(parentReservation.getDisposition());
-                    occurrence.setParticipantsCount(parentReservation.getParticipantsCount());
-                    occurrence.setDepartement(parentReservation.getDepartement());
+                    occurrence.setStartTime(updatedReservation.getStartTime());
+                    occurrence.setEndTime(updatedReservation.getEndTime());
+                    occurrence.setSubject(updatedReservation.getSubject());
+                    occurrence.setOrganizer(updatedReservation.getOrganizer());
+                    occurrence.setStatus(updatedReservation.getStatus());
+                    occurrence.setReservationType(updatedReservation.getReservationType());
+                    occurrence.setEquipment(updatedReservation.getEquipment());
+                    occurrence.setDisposition(updatedReservation.getDisposition());
+                    occurrence.setParticipantsCount(updatedReservation.getParticipantsCount());
+                    occurrence.setDepartement(updatedReservation.getDepartement());
                     occurrence.setRecurrenceRule(null);
                     validateReservation(occurrence);
                     newOccurrences.add(occurrence);
@@ -391,11 +393,18 @@ case "series":
         reservationRepository.saveAll(newOccurrences);
 
         logger.info("Publication de l'événement de modification de la série de réservations avec changement de règle de récurrence");
-        String recurrenceDetails = buildRecurrenceDatesTable(parentReservation, count, freq, interval, ruleParts);
-        eventPublisher.publishEvent(new ReservationEvent(parentReservation, actionToPublish, equipmentRelatedChanged, true, recurrenceDetails));
-        logger.info("Événement de modification publié avec succès");
+        String recurrenceDetails = buildRecurrenceDatesTable(updatedReservation, count, freq, interval, ruleParts);
+                eventPublisher.publishEvent(new ReservationEvent(updatedReservation, actionToPublish, equipmentRelatedChanged, true, recurrenceDetails));
+                //sendNotificationEmails(updatedReservation, actionToPublish, true, true, recurrenceDetails);
+                // Ajout de l'envoi de notification uniquement pour le matériel
+                if (updatedReservation.getEquipment() != null && !updatedReservation.getEquipment().trim().isEmpty()) {
+                    String details = buildReservationDetails(updatedReservation);
+                    emailService.sendEquipmentNotification(actionToPublish, details, true, recurrenceDetails);
+                    System.out.println("Email de notification envoyé au responsable matériel");
+                }
+                logger.info("Événement de modification publié avec succès");
 
-        return parentReservation;
+        return updatedReservation;
         } else {
             // Update occurrences in memory without changing recurrence rule
             for (Reservation r : series) {
@@ -551,7 +560,7 @@ case "series":
         }
 
         boolean shouldNotifyEquipment = (equipmentAffected || action.equals("créée") || action.equals("annulée") || action.equals("modifiée")) 
-                && reservation.getEquipment() != null && !reservation.getEquipment().isEmpty();
+                && reservation.getEquipment() != null && !reservation.getEquipment().trim().isEmpty();
         
         if (shouldNotifyEquipment) {
             String details = buildReservationDetails(reservation);
@@ -575,6 +584,10 @@ case "series":
     }
 
     private void validateReservation(Reservation reservation) throws IllegalArgumentException {
+        validateReservation(reservation, null);
+    }
+
+    private void validateReservation(Reservation reservation, Reservation excludeReservation) throws IllegalArgumentException {
         if (reservation.getStartTime().isBefore(WORK_START) || reservation.getEndTime().isAfter(WORK_END)) {
             throw new IllegalArgumentException("La réservation doit être entre 7h et 19h");
         }
@@ -586,6 +599,7 @@ case "series":
                 .filter(r -> r.getDate().equals(reservation.getDate()))
                 .filter(r -> r.getStatus() == Reservation.Status.CONFIRMED)
                 .filter(r -> !r.getId().equals(reservation.getId()))
+                .filter(r -> excludeReservation == null || !r.getId().equals(excludeReservation.getId()))
                 .filter(r -> !(reservation.getEndTime().isBefore(r.getStartTime()) || reservation.getEndTime().equals(r.getStartTime()) ||
                                reservation.getStartTime().isAfter(r.getEndTime()) || reservation.getStartTime().equals(r.getEndTime())))
                 .toList();
@@ -593,5 +607,92 @@ case "series":
         if (!overlapping.isEmpty()) {
             throw new IllegalArgumentException("Créneau déjà réservé");
         }
+    }
+
+    private List<Reservation> generateWeeklyOccurrences(Reservation parentReservation, int count, 
+                                                  int interval, Map<String, String> ruleParts, 
+                                                  boolean validateOverlap) {
+    List<Reservation> occurrences = new ArrayList<>();
+    LocalDate startDate = parentReservation.getDate();
+    
+    // Parse and sort days of week
+    String byDay = ruleParts.get("BYDAY");
+    List<DayOfWeek> selectedDays = Arrays.stream(byDay.split(","))
+                                      .map(RRuleHelper::parseDayOfWeek)
+                                      .sorted(Comparator.comparingInt(DayOfWeek::getValue))
+                                      .collect(Collectors.toList());
+
+    // Calculate until date if exists
+    LocalDate untilDate = ruleParts.containsKey("UNTIL") 
+        ? LocalDate.parse(ruleParts.get("UNTIL").split("T")[0], DateTimeFormatter.BASIC_ISO_DATE)
+        : null;
+
+    int occurrencesGenerated = 0;
+    int weeksToAdd = 0;
+
+    while (occurrencesGenerated < count - 1) {
+        for (DayOfWeek day : selectedDays) {
+            if (occurrencesGenerated >= count - 1) break;
+
+            LocalDate occurrenceDate = startDate.plusWeeks(weeksToAdd).with(day);
+            
+            // Skip dates before start date (for first week)
+            if (occurrenceDate.isBefore(startDate)) continue;
+            
+            // Skip if beyond until date
+            if (untilDate != null && occurrenceDate.isAfter(untilDate)) continue;
+            
+            // Skip parent date
+            if (occurrenceDate.equals(startDate)) continue;
+
+            // Check for existing occurrences
+            if (!reservationRepository.existsByParentReservationAndDate(parentReservation, occurrenceDate)) {
+                Reservation occurrence = createOccurrenceFromParent(parentReservation);
+                occurrence.setDate(occurrenceDate);
+                
+                if (validateOverlap) {
+                    validateReservation(occurrence, parentReservation);
+                }
+                
+                occurrences.add(occurrence);
+                occurrencesGenerated++;
+            }
+        }
+        weeksToAdd += interval;
+        
+        // Additional check for untilDate to prevent infinite loop
+        if (untilDate != null && startDate.plusWeeks(weeksToAdd).isAfter(untilDate)) {
+            break;
+        }
+    }
+
+    return occurrences;
+    }
+    private List<DayOfWeek> parseByDayString(String byDay) {
+        String[] days = byDay.split(",");
+        List<DayOfWeek> daysOfWeek = new ArrayList<>();
+        
+        for (String day : days) {
+            daysOfWeek.add(RRuleHelper.parseDayOfWeek(day));
+        }
+        
+        return daysOfWeek;
+    }
+
+    private Reservation createOccurrenceFromParent(Reservation parentReservation) {
+        Reservation occurrence = new Reservation();
+        occurrence.setParentReservation(parentReservation);
+        occurrence.setStartTime(parentReservation.getStartTime());
+        occurrence.setEndTime(parentReservation.getEndTime());
+        occurrence.setSubject(parentReservation.getSubject());
+        occurrence.setOrganizer(parentReservation.getOrganizer());
+        occurrence.setStatus(parentReservation.getStatus());
+        occurrence.setReservationType(parentReservation.getReservationType());
+        occurrence.setEquipment(parentReservation.getEquipment());
+        occurrence.setDisposition(parentReservation.getDisposition());
+        occurrence.setParticipantsCount(parentReservation.getParticipantsCount());
+        occurrence.setDepartement(parentReservation.getDepartement());
+        occurrence.setRecurrenceRule(null);
+        return occurrence;
     }
 }

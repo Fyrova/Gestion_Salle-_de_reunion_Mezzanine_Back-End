@@ -37,29 +37,40 @@ public class RRuleHelper {
     }
 
     public static int calculateOccurrenceCount(LocalDate startDate, Map<String, String> ruleParts) {
-        if (ruleParts.containsKey("COUNT")) {
-            return Integer.parseInt(ruleParts.get("COUNT"));
-        }
+    if (ruleParts.containsKey("COUNT")) {
+        return Integer.parseInt(ruleParts.get("COUNT"));
+    }
+    
+    if (ruleParts.containsKey("UNTIL")) {
+        String untilStr = ruleParts.get("UNTIL").split("T")[0];
+        LocalDate untilDate = parseUntilDate(untilStr);
         
-        if (ruleParts.containsKey("UNTIL")) {
-            String untilStr = ruleParts.get("UNTIL").split("T")[0];
-            LocalDate untilDate = parseUntilDate(untilStr);
-            
-            String freq = ruleParts.getOrDefault("FREQ", "DAILY");
-            int interval = Integer.parseInt(ruleParts.getOrDefault("INTERVAL", "1"));
-            
-            switch (freq) {
-                case "DAILY": return (int) ChronoUnit.DAYS.between(startDate, untilDate) / interval + 1;
-                case "WEEKLY": return (int) ChronoUnit.WEEKS.between(startDate, untilDate) / interval + 1;
-                case "MONTHLY": return (int) ChronoUnit.MONTHS.between(startDate, untilDate) / interval + 1;
-                case "YEARLY": return (int) ChronoUnit.YEARS.between(startDate, untilDate) / interval + 1;
-                default: return 1;
-            }
-        }
+        String freq = ruleParts.getOrDefault("FREQ", "DAILY");
+        int interval = Integer.parseInt(ruleParts.getOrDefault("INTERVAL", "1"));
         
+        switch (freq) {
+            case "DAILY": 
+                return (int) ChronoUnit.DAYS.between(startDate, untilDate) / interval + 1;
+            case "WEEKLY":
+                if (ruleParts.containsKey("BYDAY")) {
+                    // Pour les règles hebdomadaires avec BYDAY, calculer le nombre exact de jours correspondants
+                    String[] days = ruleParts.get("BYDAY").split(",");
+                    int daysPerWeek = days.length;
+                    long weeksBetween = ChronoUnit.WEEKS.between(startDate, untilDate) / interval;
+                    return (int) (weeksBetween * daysPerWeek) + daysPerWeek; // +daysPerWeek pour inclure la première semaine
+                }
+                return (int) ChronoUnit.WEEKS.between(startDate, untilDate) / interval + 1;
+            case "MONTHLY": 
+                return (int) ChronoUnit.MONTHS.between(startDate, untilDate) / interval + 1;
+            case "YEARLY": 
+                return (int) ChronoUnit.YEARS.between(startDate, untilDate) / interval + 1;
+            default: 
+                return 1;
+        }
+    }
+    
         return 12; // Default to 12 occurrences if COUNT or UNTIL not specified
     }
-
     public static LocalDate calculateNextDate(LocalDate currentDate, String freq, int interval, Map<String, String> ruleParts) {
         switch (freq) {
             case "DAILY":
