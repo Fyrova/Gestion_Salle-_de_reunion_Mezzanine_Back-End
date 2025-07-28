@@ -3,6 +3,7 @@ package edbm.salle.demo.model;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.util.Objects;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -18,17 +19,30 @@ public class User {
     private String email;
 
     @JsonIgnore
+    private String password;
+
+    @JsonIgnore
     @OneToMany(mappedBy = "organizer")
-    private java.util.Set<edbm.salle.demo.model.Reservation> reservations;
+    private Set<edbm.salle.demo.model.Reservation> reservations;
+
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "user_roles",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "role_id")
+    )
+    private Set<Role> roles;
 
     // Constructors, getters, setters, equals, hashCode
 
     public User() {
     }
 
-    public User(String name, String email) {
+    public User(String name, String email, String password, Set<Role> roles) {
         this.name = name;
         this.email = email;
+        this.password = password;
+        this.roles = roles;
     }
 
     public Long getId() {
@@ -55,12 +69,28 @@ public class User {
         this.email = email;
     }
 
-    public java.util.Set<edbm.salle.demo.model.Reservation> getReservations() {
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public Set<edbm.salle.demo.model.Reservation> getReservations() {
         return reservations;
     }
 
-    public void setReservations(java.util.Set<edbm.salle.demo.model.Reservation> reservations) {
+    public void setReservations(Set<edbm.salle.demo.model.Reservation> reservations) {
         this.reservations = reservations;
+    }
+
+    public Set<Role> getRoles() {
+        return roles;
+    }
+
+    public void setRoles(Set<Role> roles) {
+        this.roles = roles;
     }
 
     @Override

@@ -86,9 +86,9 @@ public class EmailService {
     }
 
     public void sendReminderEmail(String to, String organizerName, Reservation reservation) {
-        String subject = "Rappel: Réunion dans 1 heure - " + reservation.getSubject();
+        String subject = "Rappel: Réunion dans quelques heures - " + reservation.getSubject();
         String text = String.format(
-            "Bonjour %s,\n\nCeci est un rappel que votre réunion confirmée est prévue dans quelque  heure.\n\nDétails:\nDate: %s\nHeure: %s - %s\nObjet: %s\n\nCordialement,\nEDBM",
+            "Bonjour %s,\n\nCeci est un rappel que votre réunion confirmée est prévue dans quelques heures.\n\nDétails:\nDate: %s\nHeure: %s - %s\nObjet: %s\n\nCordialement,\nEDBM",
             organizerName,
             reservation.getDate(),
             reservation.getStartTime(),

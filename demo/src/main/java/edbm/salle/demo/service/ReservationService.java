@@ -125,7 +125,6 @@ public class ReservationService implements IReservationService {
             if (validateOverlap) {
                 validateReservation(reservation);
             }
-
             User organizer = reservation.getOrganizer();
             if (organizer != null) {
                 User existingUser = userRepository.findByEmailWithContext(organizer.getEmail());
@@ -323,7 +322,7 @@ private String buildRecurrenceDatesTable(Reservation parentReservation, int coun
             }
         }
 
-        switch (actionScope.toLowerCase()) {
+switch (actionScope.toLowerCase()) {
 case "series":
     Reservation parentReservation = existingReservation.getParentReservation() == null ? existingReservation : existingReservation.getParentReservation();
     List<Reservation> series = reservationRepository.findByParentReservation(parentReservation);
@@ -344,7 +343,37 @@ case "series":
                                               !Objects.equals(oldRuleParts.get("COUNT"), newRuleParts.get("COUNT")) ||
                                               !Objects.equals(oldRuleParts.get("BYSETPOS"), newRuleParts.get("BYSETPOS"));
 
-        if (recurrenceRuleChanged || recurrenceComponentsChanged) {
+if (recurrenceRuleChanged || recurrenceComponentsChanged) {
+    // Update recurrenceRule field in existingReservation before saving
+    String updatedRRule = updatedReservation.getRecurrenceRule();
+
+    // Update endDate field based on new recurrenceRule UNTIL value
+    if (newRuleParts.containsKey("UNTIL")) {
+        String untilStr = newRuleParts.get("UNTIL");
+        try {
+            java.time.LocalDate untilDate = java.time.LocalDate.parse(untilStr, java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+            existingReservation.setEndDate(untilDate);
+
+            // Update the recurrenceRule string to have the UNTIL value matching endDate
+            String formattedUntil = untilDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+            if (updatedRRule.contains("UNTIL=")) {
+                updatedRRule = updatedRRule.replaceAll("UNTIL=[^;]+", "UNTIL=" + formattedUntil);
+            } else {
+                updatedRRule += ";UNTIL=" + formattedUntil;
+            }
+        } catch (Exception e) {
+            logger.warn("Erreur lors de la conversion de la date UNTIL en endDate dans update: " + e.getMessage());
+        }
+    } else {
+        existingReservation.setEndDate(null);
+        // Remove UNTIL from recurrenceRule string if present
+        if (updatedRRule.contains("UNTIL=")) {
+            updatedRRule = updatedRRule.replaceAll(";?UNTIL=[^;]+", "");
+        }
+    }
+
+    existingReservation.setRecurrenceRule(updatedRRule);
+
             // Delete old occurrences except parent
             for (Reservation r : series) {
                 if (!r.equals(parentReservation)) {
