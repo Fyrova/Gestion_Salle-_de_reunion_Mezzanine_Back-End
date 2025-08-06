@@ -10,6 +10,11 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import edbm.salle.demo.model.Reservation;
+import edbm.salle.demo.model.EmailLog;
+import edbm.salle.demo.repository.EmailLogRepository;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import java.time.LocalDateTime;
 
 @Service
 public class EmailService {
@@ -18,6 +23,9 @@ public class EmailService {
     @Autowired
     private JavaMailSender mailSender;
 
+    @Autowired
+    private EmailLogRepository emailLogRepository;
+
     @Value("${app.equipment.manager.email}")
     private String equipmentManagerEmail;
 
@@ -25,6 +33,10 @@ public class EmailService {
     private String mailFrom;
 
     public void sendEmailSync(String to, String subject, String text) {
+        EmailLog emailLog = new EmailLog();
+        emailLog.setRecipient(to);
+        emailLog.setEmailType(subject);
+        emailLog.setSentAt(LocalDateTime.now());
         try {
             logger.info("Tentative d'envoi EMAIL à: {}", to);
             SimpleMailMessage message = new SimpleMailMessage();
@@ -34,9 +46,15 @@ public class EmailService {
             message.setText(text);
             mailSender.send(message);
             logger.info("EMAIL envoyé avec succès à: {}", to);
+            emailLog.setStatus("SUCCESS");
+            emailLog.setErrorMessage(null);
         } catch (Exception e) {
             logger.error("Échec d'envoi EMAIL à {}", to, e);
+            emailLog.setStatus("FAILURE");
+            emailLog.setErrorMessage(e.getMessage());
             throw new RuntimeException("Échec d'envoi email", e);
+        } finally {
+            emailLogRepository.save(emailLog);
         }
     }
 
@@ -86,9 +104,9 @@ public class EmailService {
     }
 
     public void sendReminderEmail(String to, String organizerName, Reservation reservation) {
-        String subject = "Rappel: Réunion dans quelques heures - " + reservation.getSubject();
+        String subject = "Rappel: Réunion prévue pour aujurd'hui  - " + reservation.getSubject();
         String text = String.format(
-            "Bonjour %s,\n\nCeci est un rappel que votre réunion confirmée est prévue dans quelques heures.\n\nDétails:\nDate: %s\nHeure: %s - %s\nObjet: %s\n\nCordialement,\nEDBM",
+            "Bonjour %s,\n\nCeci est un rappel que votre réunion confirmée est prévue aujourd'hui.\n\nDétails:\nDate: %s\nHeure: %s - %s\nObjet: %s\n\nCordialement,\nEDBM",
             organizerName,
             reservation.getDate(),
             reservation.getStartTime(),
