@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Arrays;
+import java.time.temporal.TemporalAdjusters;
 
 @RestController
 @RequestMapping("/api/reservations")
@@ -36,11 +37,12 @@ public class ReservationController {
     }
 
     @GetMapping
-    public List<Reservation> getReservationsByFilters(
+     public List<Reservation> getReservationsByFilters(
             @RequestParam(required = false) String organizerName,
             @RequestParam(required = false) String filterType,
             @RequestParam(required = false) String date,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String periodType) {
 
         List<Reservation> reservations;
 
@@ -52,10 +54,40 @@ public class ReservationController {
                 // Default or "recurring" filterType: fetch recurring reservations by organizer
                 reservations = reservationRepository.findByOrganizer(organizerName);
             }
+        } else if (periodType != null && date != null && !date.isEmpty()) {
+            // New filtering by period type (day, week, month)
+            LocalDate selectedDate = LocalDate.parse(date);
+            LocalDate startDate, endDate;
+            
+            switch (periodType.toLowerCase()) {
+                case "week":
+                    // Get the week containing the selected date (Monday to Sunday)
+                    startDate = selectedDate.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+                    endDate = selectedDate.with(TemporalAdjusters.nextOrSame(java.time.DayOfWeek.SUNDAY));
+                    break;
+                case "month":
+                    // Get the entire month containing the selected date
+                    startDate = selectedDate.with(TemporalAdjusters.firstDayOfMonth());
+                    endDate = selectedDate.with(TemporalAdjusters.lastDayOfMonth());
+                    break;
+                case "day":
+                default:
+                    // Single day
+                    startDate = selectedDate;
+                    endDate = selectedDate;
+                    break;
+            }
+            
+            if (status != null && !status.isEmpty()) {
+                reservations = reservationRepository.findByDateRangeAndStatus(startDate, endDate, Reservation.Status.valueOf(status));
+            } else {
+                reservations = reservationRepository.findByDateRange(startDate, endDate);
+            }
         } else if (date != null && !date.isEmpty() && status != null && !status.isEmpty()) {
-            reservations = reservationRepository.findByDateAndStatus(LocalDate.parse(date),
-                    Reservation.Status.valueOf(status));
+            // Legacy single date filtering
+            reservations = reservationRepository.findByDateAndStatus(LocalDate.parse(date), Reservation.Status.valueOf(status));
         } else if (date != null && !date.isEmpty()) {
+            // Legacy single date filtering
             reservations = reservationRepository.findByDate(LocalDate.parse(date));
         } else if (status != null && !status.isEmpty()) {
             reservations = reservationRepository.findByStatus(Reservation.Status.valueOf(status));
@@ -65,7 +97,6 @@ public class ReservationController {
 
         return reservations;
     }
-
     @GetMapping("/{id}")
     public Reservation getReservationById(@PathVariable Long id) {
         return reservationRepository.findById(id).orElse(null);

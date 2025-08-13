@@ -23,15 +23,15 @@ public class StatisticsController {
 
     @GetMapping
     public Map<String, Object> getStatistics() {
-        long totalReservations = reservationRepository.count();
+        long totalReservations = reservationRepository.countByStatus(Reservation.Status.CONFIRMED);
 
         LocalDate today = LocalDate.now();
-        long reservationsToday = reservationRepository.countByDate(today);
-        Long participantsToday = reservationRepository.countParticipantsByDate(today);
+        long reservationsToday = reservationRepository.countByDateAndStatus(today, Reservation.Status.CONFIRMED);
+        Long participantsToday = reservationRepository.countParticipantsByDateAndStatus(today, Reservation.Status.CONFIRMED);
         if (participantsToday == null) participantsToday = 0L;
-        Long reservedMinutesToday = reservationRepository.sumReservedMinutesByDate(today);
+        Long reservedMinutesToday = reservationRepository.sumReservedMinutesByDateAndStatus(today, Reservation.Status.CONFIRMED);
         if (reservedMinutesToday == null) reservedMinutesToday = 0L;
-        List<Reservation> reservationsListToday = reservationRepository.findReservationsByDate(today);
+        List<Reservation> reservationsListToday = reservationRepository.findReservationsByDateAndStatus(today, Reservation.Status.CONFIRMED);
 
         // Ensure stats are zero if no reservations
         if (reservationsToday == 0) {
@@ -42,7 +42,7 @@ public class StatisticsController {
 
         java.time.LocalDateTime startOfDay = java.time.LocalDateTime.of(today, java.time.LocalTime.MIN);
         java.time.LocalDateTime endOfDay = java.time.LocalDateTime.of(today, java.time.LocalTime.MAX);
-        List<Reservation> reservationsCreatedToday = reservationRepository.findReservationsCreatedOnDate(startOfDay, endOfDay);
+        List<Reservation> reservationsCreatedToday = reservationRepository.findReservationsCreatedOnDateAndStatus(startOfDay, endOfDay, Reservation.Status.CONFIRMED);
         if (reservationsCreatedToday == null) {
             reservationsCreatedToday = List.of();
         }

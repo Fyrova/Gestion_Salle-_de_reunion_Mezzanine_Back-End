@@ -18,17 +18,35 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
     @Query("SELECT COUNT(r) FROM Reservation r WHERE r.date = :date")
     long countByDate(@Param("date") LocalDate date);
 
+    @Query("SELECT COUNT(r) FROM Reservation r WHERE r.date = :date AND r.status = :status")
+    long countByDateAndStatus(@Param("date") LocalDate date, @Param("status") Reservation.Status status);
+
     @Query("SELECT SUM(COALESCE(r.participantsCount, 0)) FROM Reservation r WHERE r.date = :date")
     Long countParticipantsByDate(@Param("date") LocalDate date);
+
+    @Query("SELECT SUM(COALESCE(r.participantsCount, 0)) FROM Reservation r WHERE r.date = :date AND r.status = :status")
+    Long countParticipantsByDateAndStatus(@Param("date") LocalDate date, @Param("status") Reservation.Status status);
 
     @Query("SELECT r FROM Reservation r WHERE r.date = :date ORDER BY r.startTime")
     List<Reservation> findReservationsByDate(@Param("date") LocalDate date);
 
+    @Query("SELECT r FROM Reservation r WHERE r.date = :date AND r.status = :status ORDER BY r.startTime")
+    List<Reservation> findReservationsByDateAndStatus(@Param("date") LocalDate date, @Param("status") Reservation.Status status);
+
     @Query("SELECT SUM(FUNCTION('TIMESTAMPDIFF', MINUTE, r.startTime, r.endTime)) FROM Reservation r WHERE r.date = :date")
     Long sumReservedMinutesByDate(@Param("date") LocalDate date);
 
+    @Query("SELECT SUM(FUNCTION('TIMESTAMPDIFF', MINUTE, r.startTime, r.endTime)) FROM Reservation r WHERE r.date = :date AND r.status = :status")
+    Long sumReservedMinutesByDateAndStatus(@Param("date") LocalDate date, @Param("status") Reservation.Status status);
+
     @Query("SELECT r FROM Reservation r WHERE r.createdAt >= :startOfDay AND r.createdAt < :endOfDay ORDER BY r.startTime")
     List<Reservation> findReservationsCreatedOnDate(@Param("startOfDay") LocalDateTime startOfDay, @Param("endOfDay") LocalDateTime endOfDay);
+
+    @Query("SELECT r FROM Reservation r WHERE r.createdAt >= :startOfDay AND r.createdAt < :endOfDay AND r.status = :status ORDER BY r.startTime")
+    List<Reservation> findReservationsCreatedOnDateAndStatus(@Param("startOfDay") LocalDateTime startOfDay, @Param("endOfDay") LocalDateTime endOfDay, @Param("status") Reservation.Status status);
+
+    @Query("SELECT COUNT(r) FROM Reservation r WHERE r.status = :status")
+    long countByStatus(@Param("status") Reservation.Status status);
 
     @Query("SELECT r FROM Reservation r WHERE LOWER(r.organizer.name) LIKE LOWER(CONCAT('%', :organizerName, '%')) ORDER BY r.date, r.startTime")
     List<Reservation> findByOrganizerNameContainingIgnoreCase(@Param("organizerName") String organizerName);
@@ -83,4 +101,9 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
         @Param("parent") Reservation parent,
         @Param("fromDate") LocalDate fromDate
     );
+    @Query("SELECT r FROM Reservation r WHERE r.date >= :startDate AND r.date <= :endDate ORDER BY r.date, r.startTime")
+    List<Reservation> findByDateRange(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    @Query("SELECT r FROM Reservation r WHERE r.date >= :startDate AND r.date <= :endDate AND r.status = :status ORDER BY r.date, r.startTime")
+    List<Reservation> findByDateRangeAndStatus(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate, @Param("status") Reservation.Status status);
 }
